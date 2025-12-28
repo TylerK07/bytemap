@@ -1,0 +1,20 @@
+meta:
+  name: Simple File Header
+  description: Basic example schema showing common header patterns
+  tags: [example, tutorial, template]
+  file_patterns: []
+
+# This is a simple example schema demonstrating common patterns
+
+types:
+  FileHeader:
+    magic: bytes(4)           # Magic number / signature
+    version: u32              # File format version
+    flags: u16                # Feature flags
+    reserved: u16             # Reserved for future use
+    data_offset: u32          # Offset to actual data
+    data_size: u32            # Size of data section
+
+fields:
+  - type: FileHeader
+    name: header

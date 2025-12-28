@@ -1,0 +1,177 @@
+/* Hexmap theme */
+
+Screen {
+  layout: vertical;
+}
+
+#header {
+  dock: top;
+  height: 1;
+}
+
+#footer {
+  dock: bottom;
+  height: 1;
+  background: #1f2430; /* footer_bg */
+  color: #d8dee9;      /* footer_fg */
+}
+
+#status {
+  height: 1;
+  dock: bottom;
+  background: #1f2430; /* footer_bg */
+  color: #d8dee9;      /* footer_fg */
+}
+
+.shortcut-hint {
+  color: #ffffff;      /* shortcut_fg */
+  background: #5ea1ff; /* shortcut_bg */
+}
+
+.pane {
+  border: solid #3b4252; /* panel_border */
+}
+
+.pane:focus-within {
+  border: solid #ffa657; /* focus_border */
+}
+
+#explore-grid {
+  layout: grid;
+  grid-size: 3 1;
+  grid-columns: 1fr 1fr 1fr;
+  grid-rows: 1fr;
+  height: 1fr;
+}
+
+TabbedContent {
+  height: 1fr;
+}
+
+#overview {
+  width: 2;
+  min-width: 2;
+  max-width: 2;
+}
+
+#diff-grid {
+  layout: grid;
+  grid-size: 4 1;
+  /* Files ~25 cols, Search ~38 cols, Hex+overview 84, Right grows */
+  grid-columns: 25 38 84 1fr;
+  grid-rows: 1fr;
+  height: 1fr;
+}
+
+.hidden {
+  display: none;
+}
+
+#diff-left {
+  layout: vertical;
+}
+
+#diff-hex {
+  height: 1fr;
+}
+
+#hex-overview-row {
+  layout: horizontal;
+  height: 1fr;
+}
+
+#pane-diff-browser {
+  width: 25;
+  min-width: 20;
+  max-width: 30;
+}
+
+#pane-diff-search {
+  width: 38;
+  min-width: 30;
+  max-width: 45;
+}
+
+#pane-diff-hex {
+  width: 84;
+  min-width: 84;
+  max-width: 84;
+}
+
+#pane-diff-info {
+  min-width: 50;
+}
+
+#inspector-sep, #inspector-sep-diff {
+  layout: horizontal;
+  height: 1;
+  background: #1f2430;
+  color: #d8dee9;
+}
+#inspector-sep > *, #inspector-sep-diff > * {
+  width: 1fr;
+}
+
+#inspector-spacer, #inspector-spacer-diff {
+  height: 1;
+}
+/* Compare & Interpret modal layout
+   Keep strip auto-height and table taking remaining space
+   Root vertical stack
+   Note: these IDs exist only inside the modal
+   Adjust as needed for your Textual version */
+
+#cmp-root {
+  layout: vertical;
+  height: 100%;
+}
+
+#cmp-table-wrap {
+  height: 1fr;
+}
+
+#cmp-table {
+  height: 100%;
+}
+
+#cmp-strip-scroll {
+  max-height: 15;
+  height: auto;
+  overflow-y: auto;
+}
+
+/* Search panel spacing */
+#search-date-params {
+  padding: 0 1;
+}
+
+.help-hint {
+  color: $text-muted;
+  text-style: dim;
+  height: 1;
+}
+
+/* Clean encoding checkboxes - no boxes, just text items */
+#search-encodings {
+  height: auto;
+  padding: 0;
+  margin: 0;
+}
+
+#search-encodings > Checkbox {
+  border: none;
+  background: transparent;
+  padding: 0;
+  height: 1;
+}
+
+/* When checkbox has focus: dark orange background */
+#search-encodings > Checkbox:focus {
+  background: #b3690a;
+  border: none;
+}
+
+/* When checkbox doesn't have focus but one is selected: dark gray */
+#search-encodings > Checkbox {
+  background: transparent;
+}

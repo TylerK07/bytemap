@@ -1,0 +1,28 @@
+meta:
+  name: ZIP Archive Header
+  description: ZIP file format local file header
+  tags: [archive, zip, compression]
+  file_patterns: ["*.zip", "*.ZIP", "*.jar", "*.JAR"]
+  endian: little
+
+types:
+  LocalFileHeader:
+    signature: bytes(4)           # 0x04034b50
+    version_needed: u16
+    flags: u16
+    compression_method: u16
+    last_mod_time: u16
+    last_mod_date: u16
+    crc32: u32
+    compressed_size: u32
+    uncompressed_size: u32
+    filename_length: u16
+    extra_field_length: u16
+
+fields:
+  - type: LocalFileHeader
+    name: header
+  - type: string
+    length_ref: header.filename_length
+    encoding: utf-8
+    name: filename

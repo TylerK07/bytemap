@@ -1,0 +1,28 @@
+meta:
+  name: BMP Image Header
+  description: Windows Bitmap file format header
+  tags: [image, bmp, windows, graphics]
+  file_patterns: ["*.bmp", "*.BMP", "*.dib", "*.DIB"]
+  endian: little
+
+types:
+  BMPHeader:
+    signature: bytes(2)     # "BM"
+    file_size: u32
+    reserved1: u16
+    reserved2: u16
+    data_offset: u32
+    header_size: u32
+    width: u32
+    height: u32
+    planes: u16
+    bits_per_pixel: u16
+    compression: u32
+    image_size: u32
+    x_pixels_per_meter: u32
+    y_pixels_per_meter: u32
+    colors_used: u32
+    colors_important: u32
+
+fields:
+  - type: BMPHeader
