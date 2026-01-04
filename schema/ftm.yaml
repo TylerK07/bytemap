@@ -1,84 +1,22 @@
-
 # Schema (YAML)
 types:
-  entry:
+  leader_name: { type: string, length: 14, encoding: ascii }
+  Item:
     type: struct
     fields:
-      - { name: fType, type: bytes, length: 3, color: cyan }
-      - { name: fLen,  type: u16, endian: big, color: "#777" }
-      - { name: fData, type: bytes, length: fLen }
-
-  entry_string:
-    type: struct
-    fields:
-      - { name: fType, type: bytes, length: 3, color: cyan }
-      - { name: fLen,  type: u16, endian: big, color: "#777" }
-      - { name: fData, type: string, length: fLen, color: white }
-
-  entry_u16:
-    type: struct
-    fields:
-      - { name: fType, type: bytes, length: 3, color: cyan }
-      - { name: fLen,  type: u16, endian: big, color: "#777" }
-      - { name: u16,   type: bytes, length: fLen, encoding: u16, endian: little }
-
-  entry_date:
-    type: struct
-    fields:
-      - { name: fType, type: bytes, length: 3, color: cyan }
-      - { name: fLen,  type: u16, endian: big, color: "#777" }
-      - { name: u16, type: bytes, length: fLen, format:ftm_packed_date }
+      - { name: id, type: u8 }
+      - { name: qty, type: u8 }
 
 fields:
-  - { name: version_name,  type: entry }
-  - { name: unk_000200,    type: entry_u16 }
-  - { name: unk_date_65,   type: entry_string }
-  - { name: unk_006400,    type: entry_u16 }
-  - { name: unk_date_66,   type: entry_string }
-  - { name: num_recs_and_, type: entry }
-  - { name: unk_000500,    type: entry_u16 }
-  - { name: unk_000600,    type: entry_u16 }
-  - { name: unk_010101,    type: entry_u16 }
-  - { name: unk_010201,    type: entry_u16 }
-  - { name: unk_010301,    type: entry_u16 }
-  - { name: full_name,     type: entry_string }
-  - { name: unk_010601,    type: entry_u16 }
-  - { name: unk_010701,    type: entry }
-  - { name: unk_010801,    type: entry }
-  - { name: unk_010A01,    type: entry }
-  - { name: unk_010D01,    type: entry }
-  - { name: unk_011001,    type: entry }
-  - { name: unk_011301,    type: entry }
-  - { name: unk_011401,    type: entry }
-  - { name: unk_011501,    type: entry }
-  - { name: unk_011601,    type: entry }
-  - { name: unk_020002,    type: entry }
-  - { name: unk, type: entry }
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
-  - { name: unk,    type: entry }    
+  - name: magic
+    type: bytes
+    length: 4
+  - name: version
+    type: u16
+  - name: inventory
+    type: array of Item  # shorthand
+    length: 10
+    stride: 2
+  - name: leaders
+    type: array of leader_name
+    length: 3

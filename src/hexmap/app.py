@@ -61,6 +61,8 @@ from hexmap.core.search_lens import (
 )
 from hexmap.core.spans import Span, SpanIndex, type_group
 from hexmap.widgets.changed_fields import ChangedFieldsPanel
+from hexmap.widgets.chunking import ChunkingWidget
+from hexmap.widgets.yaml_chunking import YAMLChunkingWidget
 from hexmap.widgets.compare_strings import CompareStringsModal
 from hexmap.widgets.diff_regions import DiffRegionsPanel
 from hexmap.widgets.file_browser import FileBrowser
@@ -86,6 +88,7 @@ class HexmapApp(App):
         ("1", "tab_1", "Explore"),
         ("2", "tab_2", "Diff"),
         ("d", "tab_2", "Diff"),
+        ("3", "tab_3", "Chunking"),
         ("tab", "focus_next", "Next Focus"),
         ("shift+tab", "focus_previous", "Prev Focus"),
         ("i", "toggle_inspector", "Inspector"),
@@ -145,6 +148,9 @@ class HexmapApp(App):
         self._search_state = SearchState()
         self._search_panel: SearchPanel | None = None
         self._search_banner: SearchBanner | None = None
+        # Chunking state
+        self.chunking_widget: ChunkingWidget | None = None
+        self.yaml_chunking_widget: YAMLChunkingWidget | None = None
 
     def compose(self) -> ComposeResult:  # noqa: D401 - Textual API
         # Delay opening until compose to give clear UI errors
@@ -156,11 +162,13 @@ class HexmapApp(App):
 
         self.hex_view = HexView(self._reader)
         explore = self._build_explore_panes()
+        self.yaml_chunking_widget = YAMLChunkingWidget(self._reader)
         yield Header(show_clock=False, id="header")
         # Add TabbedContent without positional TabPane args for broader compatibility
         with TabbedContent():
             yield TabPane("Explore", explore, id="tab-explore")
             yield TabPane("Diff", self._build_diff_panes(), id="tab-diff")
+            yield TabPane("Chunking", self.yaml_chunking_widget, id="tab-chunking")
         yield self.status
         yield Footer(id="footer")
 
@@ -656,6 +664,12 @@ fields:
         # Compact hint for Diff in status line
         self.set_status_hint(
             "q Quit  ? Help  1 Explore  2 Diff  i Inspector  I Mode  [/] Prev/Next  c Toggle"
+        )
+
+    def action_tab_3(self) -> None:
+        self.query_one(TabbedContent).active = "tab-chunking"
+        self.set_status_hint(
+            "q Quit  ? Help  1 Explore  2 Diff  3 Chunking  Configure framing params and Scan"
         )
 
     # ---- Status ----

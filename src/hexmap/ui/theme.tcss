@@ -175,3 +175,126 @@ TabbedContent {
 #search-encodings > Checkbox {
   background: transparent;
 }
+
+/* Chunking tab layout - 3 columns horizontal */
+.chunking-column {
+  height: 1fr;
+}
+
+#chunking-left-col {
+  layout: vertical;
+  width: 84;
+  min-width: 72;
+  max-width: 108;
+  height: 1fr;
+  overflow-y: auto;
+}
+
+#record-table {
+  width: 1fr;
+  min-width: 50;
+}
+
+#chunking-right-col {
+  width: 40;
+  min-width: 35;
+}
+
+#framing-header, #corpus-header, #registry-header, #examples-header,
+#preview-header, #registry-label {
+  text-style: bold;
+  background: #2e3440;
+  padding: 0 1;
+  height: 1;
+}
+
+#preview-section {
+  border-top: solid #3b4252;
+  padding: 1 0;
+}
+
+#registry-section {
+  border-top: solid #3b4252;
+  padding: 1 0;
+  margin-top: 1;
+}
+
+#framing-inputs, #corpus-controls {
+  padding: 1;
+  height: auto;
+}
+
+#framing-inputs Label, #corpus-controls Label {
+  height: 1;
+  margin: 1 0 0 0;
+}
+
+#framing-inputs Input, #corpus-controls Input {
+  margin: 0 0 1 0;
+}
+
+#framing-inputs Select, #corpus-controls Select {
+  margin: 0 0 1 0;
+}
+
+#scan-button {
+  margin: 1 0 0 0;
+  width: 100%;
+}
+
+#file-list-scroll {
+  height: 1fr;
+  overflow: auto;
+}
+
+#mode-buttons {
+  height: auto;
+  padding: 1;
+}
+
+#mode-buttons Button {
+  margin: 0 1;
+}
+
+#chunk-tree {
+  height: 1fr;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+#registry-content {
+  height: 1fr;
+  overflow: auto;
+}
+
+#registry-editor {
+  padding: 1;
+}
+
+#registry-editor Label {
+  height: 1;
+  margin: 1 0 0 0;
+}
+
+#registry-editor Input {
+  margin: 0 0 1 0;
+}
+
+#registry-editor Select {
+  margin: 0 0 1 0;
+}
+
+#registry-buttons {
+  height: auto;
+  margin: 1 0;
+}
+
+#registry-buttons Button {
+  margin: 0 1;
+}
+
+#examples-scroll {
+  height: 1fr;
+  overflow: auto;
+  max-height: 20;
+}
