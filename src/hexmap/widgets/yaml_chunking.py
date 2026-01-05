@@ -13,8 +13,8 @@ from textual.widgets import Button, DataTable, Input, Label, Static, TextArea
 from hexmap.core.incremental_spans import IncrementalSpanManager
 from hexmap.core.io import PagedReader
 from hexmap.core.spans import Span, SpanIndex
-from hexmap.core.yaml_grammar import parse_yaml_grammar, PrimitiveType
-from hexmap.core.yaml_parser import ParsedRecord, RecordParser, decode_record_payload
+from hexmap.core.tool_host import LintGrammarInput, ParseBinaryInput, ToolHost
+from hexmap.core.yaml_parser import ParsedRecord, decode_record_payload
 from hexmap.ui.palette import PALETTE
 from hexmap.widgets.hex_view import HexView
 
@@ -164,16 +164,25 @@ class YAMLEditorPanel(Static):
         errors_display = self.query_one("#yaml-errors", Static)
         errors_display.remove_class("visible")
 
-        # Validate YAML
-        try:
-            grammar = parse_yaml_grammar(self.yaml_text)
-            app: HexmapApp = self.app  # type: ignore
-            if hasattr(app, "yaml_chunking_widget"):
-                app.yaml_chunking_widget.parse_with_grammar(grammar)
-        except Exception as e:
+        # Validate YAML using Tool Host
+        result = ToolHost.lint_grammar(LintGrammarInput(yaml_text=self.yaml_text))
+
+        if not result.success:
             # Show error
-            errors_display.update(f"YAML Error: {str(e)}")
+            errors_display.update(f"YAML Error: {result.errors[0]}")
             errors_display.add_class("visible")
+        else:
+            # Grammar is valid - proceed with parsing
+            app: HexmapApp = self.app  # type: ignore
+
+            # Show warnings if any (non-fatal)
+            if result.warnings:
+                warnings_text = "; ".join(result.warnings)
+                app.set_status_hint(f"Warnings: {warnings_text}")
+
+            # Trigger binary parsing with validated grammar
+            if hasattr(app, "yaml_chunking_widget"):
+                app.yaml_chunking_widget.parse_with_grammar(result.grammar)
 
 
 class RecordTablePanel(Static):
@@ -688,20 +697,25 @@ class YAMLChunkingWidget(Container):
 
         self.grammar = grammar
 
-        # Parse file
-        parser = RecordParser(grammar)
-        records, errors = parser.parse_file(self.reader)
+        # Parse file using Tool Host
+        parse_result = ToolHost.parse_binary(
+            ParseBinaryInput(
+                grammar=grammar,
+                file_path=self.reader.path
+            )
+        )
 
-        self.records = records
+        # Convert immutable tuple to list for compatibility
+        self.records = list(parse_result.records)
 
         # Update table
         table = self.query_one(RecordTablePanel)
-        table.set_data(records, self.reader)
+        table.set_data(self.records, self.reader)
 
         # Update status
-        status = f"Parsed {len(records)} records"
-        if errors:
-            status += f" ({len(errors)} errors)"
+        status = f"Parsed {parse_result.record_count} records"
+        if parse_result.errors:
+            status += f" ({len(parse_result.errors)} errors)"
         app.set_status_hint(status)
 
     def select_record(self, record: ParsedRecord) -> None:
