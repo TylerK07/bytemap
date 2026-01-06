@@ -85,6 +85,77 @@ class SpecStore:
         """Initialize empty spec store."""
         self._versions: dict[str, SpecVersion] = {}
 
+        # Working draft state (shared across tabs)
+        self._working_draft_text: str = ""
+        self._working_draft_validation: Any = None  # LintGrammarOutput cache
+
+    # ========================================================================
+    # WORKING DRAFT API (Shared YAML Buffer)
+    # ========================================================================
+
+    def get_working_text(self) -> str:
+        """Get current working draft YAML text.
+
+        Returns:
+            YAML text of working draft (may be empty string)
+        """
+        return self._working_draft_text
+
+    def set_working_text(self, text: str) -> None:
+        """Update working draft YAML text.
+
+        This invalidates the validation cache. All tabs should call this
+        when YAML is edited to keep the buffer synchronized.
+
+        Args:
+            text: New YAML text
+        """
+        self._working_draft_text = text
+        self._working_draft_validation = None  # Invalidate cache
+
+    def validate_working_draft(self) -> Any:
+        """Validate working draft using ToolHost (cached).
+
+        Returns:
+            LintGrammarOutput with success status, errors, warnings, and grammar
+        """
+        if self._working_draft_validation is None:
+            self._working_draft_validation = ToolHost.lint_grammar(
+                LintGrammarInput(yaml_text=self._working_draft_text)
+            )
+        return self._working_draft_validation
+
+    def has_working_draft(self) -> bool:
+        """Check if working draft has any content.
+
+        Returns:
+            True if working draft is non-empty
+        """
+        return bool(self._working_draft_text.strip())
+
+    def commit_working_draft(self, label: str = "Working Draft") -> str:
+        """Commit working draft as new immutable version.
+
+        Args:
+            label: Human-readable label for this version (not used in current impl)
+
+        Returns:
+            Version ID of newly created version
+
+        Raises:
+            ValueError: If working draft is empty or invalid YAML
+        """
+        if not self.has_working_draft():
+            raise ValueError("Cannot commit empty working draft")
+
+        # Use create_initial to validate and create version
+        version = self.create_initial(self._working_draft_text, run_lint=True)
+        return version.id
+
+    # ========================================================================
+    # VERSION MANAGEMENT API
+    # ========================================================================
+
     def create_initial(self, spec_text: str, run_lint: bool = True) -> SpecVersion:
         """Create initial spec version from YAML text.
 

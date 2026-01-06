@@ -13,7 +13,9 @@ from textual.widgets import Button, DataTable, Input, Label, Static, TextArea
 from hexmap.core.incremental_spans import IncrementalSpanManager
 from hexmap.core.io import PagedReader
 from hexmap.core.spans import Span, SpanIndex
+from hexmap.core.execution_profiles import CHUNKING_PROFILE
 from hexmap.core.tool_host import LintGrammarInput, ParseBinaryInput, ToolHost
+from hexmap.core.unified_parser import unified_parse
 from hexmap.core.yaml_parser import ParsedRecord, decode_record_payload
 from hexmap.ui.palette import PALETTE
 from hexmap.widgets.hex_view import HexView
@@ -148,6 +150,12 @@ class YAMLEditorPanel(Static):
         self.yaml_text = DEFAULT_YAML
 
     def compose(self):
+        # PR#1: Read YAML from shared buffer (always pre-populated in app.__init__)
+        if hasattr(self.app, "spec_store"):
+            stored_text = self.app.spec_store.get_working_text()  # type: ignore
+            if stored_text:
+                self.yaml_text = stored_text
+
         yield Label("YAML Grammar", id="yaml-header")
         with Vertical(id="yaml-editor-container"):
             yield TextArea(self.yaml_text, language="yaml", id="yaml-editor")
@@ -156,33 +164,41 @@ class YAMLEditorPanel(Static):
 
     @on(Button.Pressed, "#parse-button")
     def parse_clicked(self) -> None:
-        """Trigger parse with current YAML."""
+        """Trigger parse with current YAML (PR#2: uses unified parser)."""
         editor = self.query_one("#yaml-editor", TextArea)
         self.yaml_text = editor.text
+
+        # PR#1: Sync YAML to shared buffer
+        if hasattr(self.app, "spec_store"):
+            self.app.spec_store.set_working_text(self.yaml_text)  # type: ignore
 
         # Clear errors
         errors_display = self.query_one("#yaml-errors", Static)
         errors_display.remove_class("visible")
 
-        # Validate YAML using Tool Host
-        result = ToolHost.lint_grammar(LintGrammarInput(yaml_text=self.yaml_text))
+        # PR#2: Trigger parsing with unified parser
+        app: HexmapApp = self.app  # type: ignore
+        if hasattr(app, "yaml_chunking_widget"):
+            app.yaml_chunking_widget.parse_with_yaml(self.yaml_text)
 
-        if not result.success:
-            # Show error
-            errors_display.update(f"YAML Error: {result.errors[0]}")
-            errors_display.add_class("visible")
-        else:
-            # Grammar is valid - proceed with parsing
-            app: HexmapApp = self.app  # type: ignore
-
-            # Show warnings if any (non-fatal)
-            if result.warnings:
-                warnings_text = "; ".join(result.warnings)
-                app.set_status_hint(f"Warnings: {warnings_text}")
-
-            # Trigger binary parsing with validated grammar
-            if hasattr(app, "yaml_chunking_widget"):
-                app.yaml_chunking_widget.parse_with_grammar(result.grammar)
+    def load_from_spec_store(self) -> None:
+        """Load YAML from spec_store (called when switching to Chunking tab)."""
+        if hasattr(self.app, "spec_store"):
+            stored_text = self.app.spec_store.get_working_text()  # type: ignore
+            self.app._debug_log(f"[YAMLEditorPanel.load] Retrieved from spec_store: {len(stored_text)} chars, hash: {hash(stored_text)}")  # type: ignore
+            if stored_text:
+                self.yaml_text = stored_text
+                # Update the editor widget
+                try:
+                    editor = self.query_one("#yaml-editor", TextArea)
+                    self.app._debug_log(f"[YAMLEditorPanel.load] Current editor text: {len(editor.text)} chars, hash: {hash(editor.text)}")  # type: ignore
+                    if editor.text != stored_text:
+                        editor.load_text(stored_text)
+                        self.app._debug_log(f"[YAMLEditorPanel] ✅ Loaded from spec_store: {len(stored_text)} chars")  # type: ignore
+                    else:
+                        self.app._debug_log(f"[YAMLEditorPanel] ⏭️  No reload needed (text matches spec_store)")  # type: ignore
+                except Exception as e:
+                    self.app._debug_log(f"[YAMLEditorPanel] ❌ Failed to load from spec_store: {e}")  # type: ignore
 
 
 class RecordTablePanel(Static):
@@ -685,8 +701,66 @@ class YAMLChunkingWidget(Container):
         with Vertical(id="chunking-right-col", classes="chunking-column"):
             yield RecordInspectorPanel()
 
+    def parse_with_yaml(self, yaml_text: str) -> None:
+        """Parse file with YAML grammar using unified parser (PR#2)."""
+        app: HexmapApp = self.app  # type: ignore
+
+        if not self.reader:
+            app.set_status_hint("No file loaded")
+            return
+
+        app.set_status_hint("Parsing records...")
+
+        # PR#2: Use unified parser with CHUNKING_PROFILE
+        result = unified_parse(
+            yaml_text=yaml_text,
+            file_path=self.reader.path,
+            profile=CHUNKING_PROFILE,
+            viewport_start=0,
+            viewport_end=self.reader.size,
+        )
+
+        # Handle errors
+        if not result.success:
+            app.set_status_hint(f"Parse error: {result.errors[0]}")
+            # Show errors in YAML editor panel
+            try:
+                editor_panel = self.query_one(YAMLEditorPanel)
+                errors_display = editor_panel.query_one("#yaml-errors", Static)
+                errors_display.update("\n".join(f"❌ {err}" for err in result.errors))
+                errors_display.add_class("visible")
+            except Exception:
+                pass
+            return
+
+        # Store grammar and records
+        self.grammar = result.grammar
+        # Reconstruct ParsedRecord objects from result
+        # (Note: unified_parse converts to ParsedNode, but Chunking needs ParsedRecord)
+        # For now, re-parse using ToolHost directly to get ParsedRecord objects
+        # TODO: Update unified_parse to also return raw records
+        if result.grammar:
+            parse_result = ToolHost.parse_binary(
+                ParseBinaryInput(
+                    grammar=result.grammar,
+                    file_path=self.reader.path,
+                    max_records=CHUNKING_PROFILE.max_records,
+                )
+            )
+            self.records = list(parse_result.records)
+
+        # Update table
+        table = self.query_one(RecordTablePanel)
+        table.set_data(self.records, self.reader)
+
+        # Update status
+        status = f"Parsed {result.record_count} records, {result.coverage_percent:.1f}% coverage"
+        if result.warnings:
+            status += f" ({len(result.warnings)} warnings)"
+        app.set_status_hint(status)
+
     def parse_with_grammar(self, grammar) -> None:
-        """Parse file with given grammar."""
+        """Parse file with given grammar (legacy method, kept for compatibility)."""
         app: HexmapApp = self.app  # type: ignore
 
         if not self.reader:
@@ -701,7 +775,8 @@ class YAMLChunkingWidget(Container):
         parse_result = ToolHost.parse_binary(
             ParseBinaryInput(
                 grammar=grammar,
-                file_path=self.reader.path
+                file_path=self.reader.path,
+                max_records=CHUNKING_PROFILE.max_records,
             )
         )
 

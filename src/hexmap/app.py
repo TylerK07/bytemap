@@ -16,6 +16,7 @@ from textual.widgets import (
     Static,
     TabbedContent,
     TabPane,
+    TextArea,
 )
 
 from hexmap.core.coverage import compute_coverage
@@ -25,6 +26,9 @@ from hexmap.core.intersect import intersect_spans
 from hexmap.core.io import PagedReader
 from hexmap.core.parse import apply_schema_tree
 from hexmap.core.schema import SchemaError, load_schema
+from hexmap.core.spec_version import SpecStore
+from hexmap.core.execution_profiles import EXPLORE_PROFILE
+from hexmap.core.unified_parser import unified_parse
 from hexmap.core.schema_edit import (
     upsert_array_field,
     upsert_ascii_type_and_field,
@@ -63,7 +67,7 @@ from hexmap.core.spans import Span, SpanIndex, type_group
 from hexmap.widgets.agent_workbench import AgentWorkbenchTab, HighlightBytesRequest
 from hexmap.widgets.changed_fields import ChangedFieldsPanel
 from hexmap.widgets.chunking import ChunkingWidget
-from hexmap.widgets.yaml_chunking import YAMLChunkingWidget
+from hexmap.widgets.yaml_chunking import YAMLChunkingWidget, YAMLEditorPanel
 from hexmap.widgets.compare_strings import CompareStringsModal
 from hexmap.widgets.diff_regions import DiffRegionsPanel
 from hexmap.widgets.file_browser import FileBrowser
@@ -154,6 +158,51 @@ class HexmapApp(App):
         self.chunking_widget: ChunkingWidget | None = None
         self.yaml_chunking_widget: YAMLChunkingWidget | None = None
 
+        # Shared YAML state across all tabs (PR#1: Unified YAML Buffer)
+        self.spec_store = SpecStore()
+        self._previous_active_tab: str | None = None  # Track previous tab for sync
+
+        # Debug logging to file
+        self._debug_log_file = open("/tmp/hexmap_sync_debug.log", "w")
+
+        # PR#2: Initialize spec_store with default schema BEFORE compose()
+        # This ensures all tabs see the same initial YAML
+        default_schema = """# Example YAML Grammar (ToolHost format)
+format: record_stream
+endian: little
+
+framing:
+  repeat: until_eof
+
+record:
+  use: DataRecord
+
+types:
+  Header:
+    fields:
+      - { name: magic, type: u32 }
+      - { name: version, type: u16 }
+      - { name: record_type, type: u16 }
+
+  DataRecord:
+    fields:
+      - { name: header, type: Header }
+      - { name: payload_length, type: u16 }
+      - { name: payload, type: bytes, length: payload_length }
+"""
+        self.spec_store.set_working_text(default_schema)
+
+        # Agent Workbench state
+        self.agent_workbench: AgentWorkbenchTab | None = None
+
+    def _debug_log(self, message: str) -> None:
+        """Write debug message to file."""
+        if hasattr(self, "_debug_log_file"):
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            self._debug_log_file.write(f"[{timestamp}] {message}\n")
+            self._debug_log_file.flush()
+
     def compose(self) -> ComposeResult:  # noqa: D401 - Textual API
         # Delay opening until compose to give clear UI errors
         try:
@@ -180,34 +229,94 @@ class HexmapApp(App):
         self.update_status()
         if self.hex_view is not None:
             self.set_focus(self.hex_view)
-        if self._schema is not None and not self._schema.text:
-            self._schema.load_text(
-                """# Schema (YAML)
-types:
-  leader_name: { type: string, length: 14, encoding: ascii }
-  Item:
-    type: struct
-    fields:
-      - { name: id, type: u8 }
-      - { name: qty, type: u8 }
 
-fields:
-  - name: magic
-    type: bytes
-    length: 4
-  - name: version
-    type: u16
-  - name: inventory
-    type: array of Item  # shorthand
-    length: 10
-    stride: 2
-  - name: leaders
-    type: array of leader_name
-    length: 3
-"""
-            )
+        # PR#2: Load default schema from spec_store into Explore tab editor
+        if self._schema is not None:
+            # Use load_from_spec_store() which properly handles sync tracking
+            self._schema.load_from_spec_store()
             # Auto-apply the default schema immediately
-            self.schedule_schema_apply(delay=0.1)
+            if self._schema.text:
+                self.schedule_schema_apply(delay=0.1)
+
+        # Track initial tab for sync
+        try:
+            tabbed_content = self.query_one(TabbedContent)
+            self._previous_active_tab = tabbed_content.active
+        except Exception:
+            pass
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """Handle tab changes from MOUSE CLICKS only.
+
+        Keyboard shortcuts (action_tab_1, action_tab_3, etc.) handle sync directly.
+        This event handler catches mouse clicks on tabs.
+        """
+        # Get the TabbedContent's active tab ID (normalized format)
+        tabbed_content = self.query_one(TabbedContent)
+        new_tab = tabbed_content.active
+
+        self._debug_log(f"\n{'='*60}")
+        self._debug_log(f"[MOUSE_CLICK] Tab clicked with mouse!")
+        self._debug_log(f"[MOUSE_CLICK] Previous tab: {self._previous_active_tab}")
+        self._debug_log(f"[MOUSE_CLICK] New tab: {new_tab}")
+
+        # Sync from the previous tab (if we know what it was)
+        if self._previous_active_tab and self._previous_active_tab != new_tab:
+            self._debug_log(f"[MOUSE_CLICK] Will sync from: {self._previous_active_tab}")
+            self._sync_from_specific_tab(self._previous_active_tab)
+            self._debug_log(f"[MOUSE_CLICK] Will load into: {new_tab}")
+            self._load_into_specific_tab(new_tab)
+        else:
+            self._debug_log(f"[MOUSE_CLICK] Skipping sync (no previous tab or same tab)")
+
+        # Update previous tab tracker
+        self._previous_active_tab = new_tab
+        self._debug_log(f"[MOUSE_CLICK] Updated previous tab tracker to: {new_tab}")
+        self._debug_log(f"{'='*60}\n")
+
+    def _sync_from_specific_tab(self, tab_id: str) -> None:
+        """Sync YAML from a specific tab to spec_store."""
+        self._debug_log(f"[SYNC_FROM] Syncing from tab: {tab_id}")
+
+        if tab_id == "tab-explore" and self._schema is not None:
+            try:
+                self._schema._sync_to_spec_store()
+                self._debug_log(f"[SYNC_FROM] Synced from Explore: {len(self._schema.text)} chars")
+            except Exception as e:
+                self._debug_log(f"[SYNC_FROM ERROR] Failed to sync from Explore: {e}")
+
+        elif tab_id == "tab-chunking" and self.yaml_chunking_widget is not None:
+            try:
+                editor_panel = self.yaml_chunking_widget.query_one(YAMLEditorPanel)
+                editor = editor_panel.query_one("#yaml-editor", TextArea)
+                yaml_text = editor.text
+                self.spec_store.set_working_text(yaml_text)
+                self._debug_log(f"[SYNC_FROM] Synced from Chunking: {len(yaml_text)} chars")
+            except Exception as e:
+                self._debug_log(f"[SYNC_FROM ERROR] Failed to sync from Chunking: {e}")
+
+        # Show what's in spec_store after sync
+        stored = self.spec_store.get_working_text()
+        self._debug_log(f"[SPEC_STORE] After sync from {tab_id}: {len(stored)} chars, hash: {hash(stored)}")
+
+    def _load_into_specific_tab(self, tab_id: str) -> None:
+        """Load YAML from spec_store into a specific tab."""
+        self._debug_log(f"[LOAD_INTO] Loading into tab: {tab_id}")
+
+        if tab_id == "tab-explore" and self._schema is not None:
+            try:
+                self._schema.load_from_spec_store()
+                self._debug_log(f"[LOAD_INTO] Loaded into Explore")
+            except Exception as e:
+                self._debug_log(f"[LOAD_INTO ERROR] Failed to load into Explore: {e}")
+
+        elif tab_id == "tab-chunking" and self.yaml_chunking_widget is not None:
+            try:
+                editor_panel = self.yaml_chunking_widget.query_one(YAMLEditorPanel)
+                editor_panel.load_from_spec_store()
+                self._debug_log(f"[LOAD_INTO] Loaded into Chunking")
+            except Exception as e:
+                self._debug_log(f"[LOAD_INTO ERROR] Failed to load into Chunking: {e}")
 
     # ---- Actions ----
     def action_cursor_up(self) -> None:
@@ -655,10 +764,44 @@ fields:
     def action_switch_previous_tab(self) -> None:
         self.query_one(TabbedContent).action_previous_tab()
 
+    def _force_sync_before_tab_switch(self) -> None:
+        """Update the previous tab tracker before switching.
+
+        Note: Actual syncing is now handled by on_tabbed_content_tabbed() event handler,
+        which catches both mouse clicks and keyboard shortcuts.
+        """
+        try:
+            tabbed_content = self.query_one(TabbedContent)
+            self._previous_active_tab = tabbed_content.active
+            self._debug_log(f"[PRE_SWITCH] Updating previous tab to: {self._previous_active_tab}")
+        except Exception as e:
+            self._debug_log(f"[PRE_SWITCH ERROR] Could not update previous tab: {e}")
+
     def action_tab_1(self) -> None:
-        self.query_one(TabbedContent).active = "tab-explore"
+        # PR#1: Sync from current tab, then switch and load
+        tabbed_content = self.query_one(TabbedContent)
+        current_tab = tabbed_content.active
+        new_tab = "tab-explore"
+
+        self._debug_log(f"[ACTION_TAB_1] Switching from {current_tab} to {new_tab}")
+
+        # Sync from current tab before switching
+        if current_tab != new_tab:
+            self._sync_from_specific_tab(current_tab)
+
+        # Switch tab
+        tabbed_content.active = new_tab
+
+        # Load into new tab
+        self._load_into_specific_tab(new_tab)
+
+        # Update tracker for future switches
+        self._previous_active_tab = new_tab
 
     def action_tab_2(self) -> None:
+        # PR#1: Force sync from other tabs BEFORE switching
+        self._force_sync_before_tab_switch()
+
         self.query_one(TabbedContent).active = "tab-diff"
         # Focus file browser first for quick selection
         if self._diff_browser is not None:
@@ -671,21 +814,45 @@ fields:
         )
 
     def action_tab_3(self) -> None:
-        self.query_one(TabbedContent).active = "tab-chunking"
+        # PR#1: Sync from current tab, then switch and load
+        tabbed_content = self.query_one(TabbedContent)
+        current_tab = tabbed_content.active
+        new_tab = "tab-chunking"
+
+        self._debug_log(f"[ACTION_TAB_3] Switching from {current_tab} to {new_tab}")
+
+        # Sync from current tab before switching
+        if current_tab != new_tab:
+            self._sync_from_specific_tab(current_tab)
+
+        # Switch tab
+        tabbed_content.active = new_tab
+
+        # Load into new tab
+        self._load_into_specific_tab(new_tab)
+
+        # Update tracker for future switches
+        self._previous_active_tab = new_tab
+
         self.set_status_hint(
             "q Quit  ? Help  1 Explore  2 Diff  3 Chunking  Configure framing params and Scan"
         )
 
     def action_tab_4(self) -> None:
+        # PR#1: Force sync from other tabs BEFORE switching
+        self._force_sync_before_tab_switch()
+
         self.query_one(TabbedContent).active = "tab-workbench"
         self.set_status_hint(
             "q Quit  ? Help  4 Workbench  LLM-driven spec iteration"
         )
-        # PR#3: Initialize workbench with current schema if not already initialized
+        # PR#1: Initialize workbench with current schema from shared buffer
         if self.agent_workbench and self.agent_workbench.manager is None:
-            if self._schema and self._schema.text:
+            # Read from shared spec_store instead of self._schema
+            spec_text = self.spec_store.get_working_text()
+            if spec_text and spec_text.strip():
                 self.agent_workbench.initialize_with_schema(
-                    self._schema.text,
+                    spec_text,
                     label="Current Schema"
                 )
             else:
@@ -1132,110 +1299,103 @@ fields:
 
     # ---- Schema apply ----
     def action_apply_schema(self) -> None:
+        """Apply YAML schema using unified ToolHost parser (PR#2)."""
         if self._schema is None or self._reader is None:
             return
-        text = self._schema.text
+
+        # Get YAML from shared spec_store (PR#1)
+        text = self.spec_store.get_working_text()
+        if not text:
+            text = self._schema.text  # Fallback to editor text
+
         if self._last_schema_text == text:
             return
-        try:
-            schema = load_schema(text)
-        except SchemaError as e:
-            if self._output is not None:
-                self._output.set_errors(e.errors)
-            if self.hex_view is not None:
-                self.hex_view.set_overlays([])
-            self.set_status_hint("[schema errors]")
-            return
-        tree, leaves, errs = apply_schema_tree(self._reader, schema)
-        self._last_schema_text = text
-        if errs:
-            if self._output is not None:
-                self._output.set_errors(errs)
-            if self.hex_view is not None:
-                self.hex_view.set_overlays([])
-            self.set_status_hint("[schema errors]")
-            return
-        if self._output is not None:
-            self._output.set_tree(tree)
-        regions: list[tuple[int, int, str, str]] = []
-        for pf in leaves:
-            if pf.error:
-                continue
-            regions.append((pf.offset, pf.length, pf.name, pf.type))
-        if self.hex_view is not None:
-            self.hex_view.set_overlays(regions)
-        # Propagate mapped coverage to Diff hex as well
-        if self._diff_hex is not None:
-            from contextlib import suppress
-            with suppress(Exception):
-                self._diff_hex.set_overlays(regions)
-        # Compute coverage and update UI components
-        covered, unmapped = compute_coverage(leaves, self._reader.size)
-        total = self._reader.size or 1
-        unmapped_bytes = sum(ln for (_s, ln) in unmapped)
-        self._mapped_percent = max(0.0, min(100.0, (1 - unmapped_bytes / total) * 100.0))
-        if self._output is not None:
-            from contextlib import suppress
 
+        # PR#2: Use unified parser with EXPLORE_PROFILE
+        viewport_start = 0
+        viewport_end = self._reader.size
+        if self.hex_view is not None:
+            viewport_start = self.hex_view.top_offset()
+            viewport_end = viewport_start + (self.hex_view.visible_rows() * self.hex_view.bytes_per_row)
+
+        result = unified_parse(
+            yaml_text=text,
+            file_path=self._path,
+            profile=EXPLORE_PROFILE,
+            viewport_start=viewport_start,
+            viewport_end=viewport_end,
+        )
+
+        self._last_schema_text = text
+
+        # Handle errors
+        if not result.success:
+            if self._output is not None:
+                self._output.set_errors(result.errors)
+            if self.hex_view is not None:
+                self.hex_view.set_overlays([])
+            error_summary = result.errors[0] if result.errors else "Unknown error"
+            self.set_status_hint(f"[{error_summary}]")
+            return
+
+        # Update output panel with tree
+        if self._output is not None and result.tree:
+            self._output.set_tree(result.tree)
+
+        # Update hex view with overlays
+        if self.hex_view is not None and result.overlays:
+            self.hex_view.set_overlays(result.overlays)
+        # Propagate mapped coverage to Diff hex as well
+        if self._diff_hex is not None and result.overlays:
+            from contextlib import suppress
             with suppress(Exception):
-                self._output.set_unmapped(unmapped)
-        if hasattr(self, "_overview") and self._overview is not None:
+                self._diff_hex.set_overlays(result.overlays)
+
+        # Store coverage results
+        self._mapped_percent = result.coverage_percent
+
+        # Update output panel with unmapped regions
+        if self._output is not None and result.unmapped:
+            from contextlib import suppress
+            with suppress(Exception):
+                self._output.set_unmapped(result.unmapped)
+
+        # Update overview with coverage
+        if hasattr(self, "_overview") and self._overview is not None and result.covered:
             self._overview.update_state(
                 file_size=self._reader.size,
-                covered=[(s, ln) for (s, ln, _p) in covered],
+                covered=[(s, ln) for (s, ln, _p) in result.covered],
                 viewport=(
-                    self.hex_view.top_offset(),
-                    self.hex_view.visible_rows() * self.hex_view.bytes_per_row,
+                    self.hex_view.top_offset() if self.hex_view else 0,
+                    (self.hex_view.visible_rows() * self.hex_view.bytes_per_row) if self.hex_view else 0,
                 ),
             )
-        # Build span index for linking
-        spans = [
-            Span(
-                pf.offset,
-                pf.length,
-                pf.name,
-                type_group(pf.type),
-                pf.effective_endian,
-                pf.endian_source,
-                pf.color_override,
-            )
-            for pf in leaves
-            if not pf.error and pf.length > 0
-        ]
-        self._span_index = SpanIndex(spans)
-        if self.hex_view is not None:
-            self.hex_view.set_span_index(self._span_index)
+
+        # Set span index for linking
+        if result.span_index:
+            self._span_index = result.span_index
+            if self.hex_view is not None:
+                self.hex_view.set_span_index(result.span_index)
+
         # Set span index on Diff hex to enable mapped/unmapped styling there
-        if self._diff_hex is not None:
+        if self._diff_hex is not None and result.spans:
             from contextlib import suppress
             with suppress(Exception):
-                self._diff_hex.set_span_index(SpanIndex(spans))
-        # Also update Diff tab's parsed structure if present, using current diff spans
-        if self._diff_output is not None:
+                self._diff_hex.set_span_index(SpanIndex(result.spans))
+
+        # Also update Diff tab's parsed structure if present
+        if self._diff_output is not None and result.tree:
             try:
                 # Push primary parsed tree
-                self._diff_output.set_tree(tree)
+                self._diff_output.set_tree(result.tree)
                 # Recompute changed map against current diff regions (if any)
-                if self._diff_regions is not None:
-                    fspans = [
-                        Span(
-                            pf.offset,
-                            pf.length,
-                            pf.name,
-                            type_group(pf.type),
-                            pf.effective_endian,
-                            pf.endian_source,
-                            pf.color_override,
-                        )
-                        for pf in leaves
-                        if pf.length and pf.length > 0
-                    ]
-                    change_map = intersect_spans(fspans, self._diff_regions)
+                if self._diff_regions is not None and result.spans:
+                    change_map = intersect_spans(result.spans, self._diff_regions)
                     self._diff_output.set_change_map(change_map)
                     # Rebuild Changed Fields panel if available
-                    if self._diff_changed_panel is not None:
+                    if self._diff_changed_panel is not None and result.leaves:
                         items = []
-                        for pf in leaves:
+                        for pf in result.leaves:
                             info = change_map.get(pf.name)
                             if info and info.get("changed"):
                                 items.append(
@@ -1250,12 +1410,13 @@ fields:
                         self._diff_changed_panel.set_items(items)
             except Exception:
                 pass
+
         # Update Diff overview with mapped coverage
         try:
-            if self._diff_overview is not None and self._diff_hex is not None:
+            if self._diff_overview is not None and self._diff_hex is not None and result.covered:
                 self._diff_overview.update_state(
                     file_size=self._reader.size,
-                    covered=[(s, ln) for (s, ln, _p) in covered],
+                    covered=[(s, ln) for (s, ln, _p) in result.covered],
                     viewport=(
                         self._diff_hex.top_offset(),
                         self._diff_hex.visible_rows() * self._diff_hex.bytes_per_row,
@@ -1263,7 +1424,9 @@ fields:
                 )
         except Exception:
             pass
-        self.set_status_hint("[schema applied]")
+
+        # Show success message with parse stats
+        self.set_status_hint(f"[Parsed {result.record_count} records, {result.coverage_percent:.1f}% coverage]")
 
     # Debounced schedule from SchemaEditor
     def schedule_schema_apply(self, delay: float = 0.2) -> None:
