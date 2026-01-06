@@ -60,6 +60,7 @@ from hexmap.core.search_lens import (
     search_date_unix_s,
 )
 from hexmap.core.spans import Span, SpanIndex, type_group
+from hexmap.widgets.agent_workbench import AgentWorkbenchTab, HighlightBytesRequest
 from hexmap.widgets.changed_fields import ChangedFieldsPanel
 from hexmap.widgets.chunking import ChunkingWidget
 from hexmap.widgets.yaml_chunking import YAMLChunkingWidget
@@ -89,6 +90,7 @@ class HexmapApp(App):
         ("2", "tab_2", "Diff"),
         ("d", "tab_2", "Diff"),
         ("3", "tab_3", "Chunking"),
+        ("4", "tab_4", "Workbench"),
         ("tab", "focus_next", "Next Focus"),
         ("shift+tab", "focus_previous", "Prev Focus"),
         ("i", "toggle_inspector", "Inspector"),
@@ -163,12 +165,14 @@ class HexmapApp(App):
         self.hex_view = HexView(self._reader)
         explore = self._build_explore_panes()
         self.yaml_chunking_widget = YAMLChunkingWidget(self._reader)
+        self.agent_workbench = AgentWorkbenchTab(self._path)
         yield Header(show_clock=False, id="header")
         # Add TabbedContent without positional TabPane args for broader compatibility
         with TabbedContent():
             yield TabPane("Explore", explore, id="tab-explore")
             yield TabPane("Diff", self._build_diff_panes(), id="tab-diff")
             yield TabPane("Chunking", self.yaml_chunking_widget, id="tab-chunking")
+            yield TabPane("Workbench", self.agent_workbench, id="tab-workbench")
         yield self.status
         yield Footer(id="footer")
 
@@ -671,6 +675,50 @@ fields:
         self.set_status_hint(
             "q Quit  ? Help  1 Explore  2 Diff  3 Chunking  Configure framing params and Scan"
         )
+
+    def action_tab_4(self) -> None:
+        self.query_one(TabbedContent).active = "tab-workbench"
+        self.set_status_hint(
+            "q Quit  ? Help  4 Workbench  LLM-driven spec iteration"
+        )
+        # PR#3: Initialize workbench with current schema if not already initialized
+        if self.agent_workbench and self.agent_workbench.manager is None:
+            if self._schema and self._schema.text:
+                self.agent_workbench.initialize_with_schema(
+                    self._schema.text,
+                    label="Current Schema"
+                )
+            else:
+                # No schema available - show error in workbench
+                if self.agent_workbench._version_list:
+                    self.agent_workbench._version_list.clear_options()
+                    self.agent_workbench._version_list.add_option("No schema available")
+                if self.agent_workbench._version_inspector:
+                    self.agent_workbench._version_inspector.update(
+                        "Cannot initialize: No schema loaded.\n\n"
+                        "Please switch to the Explore tab and create/load a schema."
+                    )
+
+    def on_highlight_bytes_request(self, message: HighlightBytesRequest) -> None:
+        """Handle byte highlighting request from workbench.
+
+        PR#6: Workbench posts this message when user selects a run with errors/anomalies.
+        """
+        if self.hex_view is None:
+            return
+
+        # Set highlighted byte ranges
+        if message.byte_ranges:
+            self.hex_view.set_selected_spans(message.byte_ranges)
+        else:
+            self.hex_view.set_selected_spans(None)
+
+        # Jump cursor to offset if specified
+        if message.jump_to_offset is not None:
+            self.hex_view.set_cursor(message.jump_to_offset)
+
+        # Update status
+        self.update_status()
 
     # ---- Status ----
     def update_status(self) -> None:

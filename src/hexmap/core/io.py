@@ -87,6 +87,11 @@ class PagedReader:
         """File size in bytes."""
         return self._size
 
+    @property
+    def path(self) -> str:
+        """File path."""
+        return self._path
+
     # Internal: fetch a page (LRU-cached) in buffered mode
     def _get_page(self, index: int) -> _Page:
         if index in self._cache:

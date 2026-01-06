@@ -298,3 +298,116 @@ TabbedContent {
   overflow: auto;
   max-height: 20;
 }
+
+/* ============================================================================
+   Agent Workbench Tab (PR#1, PR#2)
+   ============================================================================ */
+
+#workbench-header {
+  height: 1;
+  background: $panel;
+  padding: 0 1;
+  color: $text;
+}
+
+#workbench-columns {
+  height: 1fr;
+}
+
+.workbench-column {
+  border: solid $panel-lighten-1;
+  width: 1fr;
+  height: 1fr;
+  layout: vertical;
+}
+
+.workbench-column:focus-within {
+  border: solid $accent;
+}
+
+.column-header {
+  height: 1;
+  background: $panel-lighten-1;
+  padding: 0 1;
+  text-style: bold;
+  color: $text;
+}
+
+.column-scroll {
+  height: 1fr;
+  overflow: auto;
+}
+
+.column-inspector {
+  height: auto;
+  max-height: 10;
+  border-top: solid $panel-lighten-1;
+  padding: 1;
+  background: $panel;
+  overflow: auto;
+}
+
+.section-label {
+  height: 1;
+  padding: 0 1;
+  text-style: bold;
+  color: $text-muted;
+}
+
+#version-list, #patch-ops-list, #runs-list {
+  height: auto;
+}
+
+#version-inspector, #patch-ops-inspector, #runs-inspector, #evidence-content {
+  color: $text-muted;
+}
+
+#version-actions {
+  height: auto;
+  margin-top: 1;
+}
+
+#version-actions Button {
+  margin: 0 1 0 0;
+}
+
+/* ============================================================================
+   PR#8: Chat Interface (Column 1)
+   ============================================================================ */
+
+#versions-chat-tabs {
+  height: 1fr;
+}
+
+#chat-container {
+  layout: vertical;
+  height: 1fr;
+}
+
+#chat-log-scroll {
+  height: 1fr;
+  overflow: auto;
+}
+
+#chat-log {
+  padding: 1;
+  color: $text-muted;
+}
+
+#chat-input-area {
+  height: auto;
+  padding: 1;
+  border-top: solid $panel-lighten-1;
+}
+
+#chat-input {
+  margin-bottom: 1;
+}
+
+#chat-buttons {
+  height: auto;
+}
+
+#chat-buttons Button {
+  margin-right: 1;
+}
